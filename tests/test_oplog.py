@@ -81,6 +81,33 @@ class TestBasicOperations:
         records = db.query(run_id="my-custom-run-id")
         assert len(records) == 1
 
+    def test_run_level_metadata(self, configured_oplog):
+        """Test that run-level metadata is propagated to operations."""
+        with run(strategy="methodA", experiment_id="exp123") as r:
+            op("test").save()
+            op("test").meta(latency_ms=42).save()
+
+        records = db.query(run_id=r.id)
+        assert len(records) == 2
+
+        for rec in records:
+            assert rec.meta["strategy"] == "methodA"
+            assert rec.meta["experiment_id"] == "exp123"
+
+        # Check that operation-level meta is also present
+        latency_record = [r for r in records if r.meta.get("latency_ms")][0]
+        assert latency_record.meta["latency_ms"] == 42
+
+    def test_run_metadata_override(self, configured_oplog):
+        """Test that operation-level metadata overrides run-level metadata."""
+        with run(strategy="methodA") as r:
+            op("test").meta(strategy="methodB").save()
+
+        records = db.query(run_id=r.id)
+        assert len(records) == 1
+        # Operation-level should override run-level
+        assert records[0].meta["strategy"] == "methodB"
+
 
 class TestFlagging:
     """Test flag/unflag functionality."""
@@ -230,3 +257,20 @@ class TestQuery:
         # Multiple tags (AND logic)
         records = db.query(tags=["alpha", "beta"])
         assert len(records) == 1
+
+
+class TestSQLiteAutoCreate:
+    """Test SQLite database auto-creation."""
+
+    def test_creates_db_in_new_directory(self, tmp_path):
+        """Test that SQLite creates db file and parent directories."""
+        # Create a path with nested directories that don't exist
+        db_path = tmp_path / "nested" / "dirs" / "traces.db"
+        assert not db_path.parent.exists()
+
+        configure(project="test", backend=f"sqlite:///{db_path}")
+        op("test").save()
+
+        # Directory and file should now exist
+        assert db_path.parent.exists()
+        assert db_path.exists()

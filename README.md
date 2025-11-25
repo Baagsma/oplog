@@ -29,8 +29,8 @@ op("classify") \
     .output(label="greeting", score=0.95) \
     .save()
 
-# Log grouped operations within a run
-with run() as r:
+# Log grouped operations within a run (with run-level metadata for A/B testing)
+with run(strategy="rerank_v2", experiment="exp_042") as r:
     op("retrieve") \
         .model("bge-m3") \
         .input(query="capital of France?", k=10) \
@@ -43,6 +43,7 @@ with run() as r:
         .output(ranked=["Paris is the capital..."], scores=[0.94]) \
         .meta(latency_ms=42) \
         .save()
+    # Both ops get meta={"strategy": "rerank_v2", "experiment": "exp_042", ...}
 
 # Flag for training
 db.flag(run_id=r.id, reason="training", note="clean example")
@@ -61,7 +62,7 @@ configure(project="name", backend="sqlite:///traces.db")
 ```
 
 **Backend formats:**
-- SQLite: `sqlite:///path/to/traces.db`
+- SQLite: `sqlite:///path/to/traces.db` (auto-creates file and parent directories)
 - PostgreSQL: `postgresql://user:pass@host:port/dbname`
 
 ### Operations
@@ -86,7 +87,14 @@ with run() as r:            # Auto-generated run ID
 
 with run("custom-id"):      # Explicit run ID
     ...
+
+# Run-level metadata (propagates to all operations in the run)
+with run(strategy="methodA", experiment_id="exp123") as r:
+    op("test").save()                      # meta={"strategy": "methodA", "experiment_id": "exp123"}
+    op("test").meta(latency_ms=42).save()  # meta includes both run + op metadata
 ```
+
+Run metadata is merged with operation metadata. Operation-level values override run-level on conflicts.
 
 ### Database Operations
 

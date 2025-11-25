@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
@@ -43,6 +44,13 @@ class SQLBackend:
         """
         self._connection_string = connection_string
         self._is_sqlite = connection_string.startswith("sqlite")
+
+        # For SQLite, ensure parent directories exist
+        if self._is_sqlite:
+            # Parse the path from sqlite:///path/to/db.db
+            db_path = connection_string.replace("sqlite:///", "")
+            if db_path and db_path != ":memory:":
+                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         # Create engine with appropriate settings
         if self._is_sqlite:

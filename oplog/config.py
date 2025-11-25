@@ -1,7 +1,7 @@
 """Global configuration and Tracer class for oplog."""
 
 from contextlib import contextmanager
-from typing import Iterator, Optional, Union
+from typing import Any, Iterator, Optional, Union
 
 from oplog.backends import Backend
 from oplog.backends.sql import SQLBackend
@@ -67,16 +67,25 @@ class Tracer:
         )
 
     @contextmanager
-    def run(self, run_id: Optional[str] = None) -> Iterator[RunContext]:
+    def run(
+        self,
+        run_id: Optional[str] = None,
+        **meta: Any,
+    ) -> Iterator[RunContext]:
         """Context manager for grouping related operations.
 
         Args:
             run_id: Optional explicit run ID. If not provided, a ULID is generated.
+            **meta: Run-level metadata that will be merged into all operations.
 
         Yields:
             The RunContext for this run.
+
+        Example:
+            with tracer.run(strategy="methodA", experiment_id="exp123") as r:
+                tracer.op("test").save()  # Has meta={"strategy": "methodA", ...}
         """
-        with run_context(run_id) as ctx:
+        with run_context(run_id, meta=meta if meta else None) as ctx:
             yield ctx
 
 
@@ -91,9 +100,17 @@ def configure(
     Args:
         project: Project namespace. All operations are tagged with this.
         backend: Either a connection string or a Backend instance.
+            Connection string formats:
+            - SQLite: "sqlite:///traces.db" (relative) or "sqlite:////abs/path/traces.db"
+            - PostgreSQL: "postgresql://user:pass@host:port/dbname"
+
+            SQLite databases are auto-created, including any missing parent directories.
 
     Returns:
         The configured Tracer instance.
+
+    Example:
+        configure(project="my_project", backend="sqlite:///traces.db")
     """
     global _default_tracer
     _default_tracer = Tracer(project=project, backend=backend)
@@ -129,21 +146,26 @@ def op(operation: str) -> OpBuilder:
 
 
 @contextmanager
-def run(run_id: Optional[str] = None) -> Iterator[RunContext]:
+def run(run_id: Optional[str] = None, **meta: Any) -> Iterator[RunContext]:
     """Context manager for grouping related operations.
 
     Uses the global tracer.
 
     Args:
         run_id: Optional explicit run ID. If not provided, a ULID is generated.
+        **meta: Run-level metadata that will be merged into all operations.
 
     Yields:
         The RunContext for this run.
 
     Raises:
         RuntimeError: If configure() has not been called.
+
+    Example:
+        with run(strategy="methodA", experiment_id="exp123") as r:
+            op("test").save()  # Has meta={"strategy": "methodA", ...}
     """
     # Validate tracer is configured
     get_tracer()
-    with run_context(run_id) as ctx:
+    with run_context(run_id, meta=meta if meta else None) as ctx:
         yield ctx

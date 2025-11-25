@@ -107,6 +107,14 @@ class OpBuilder:
         """
         run_ctx = get_current_run()
 
+        # Merge run-level metadata with operation-level metadata
+        # Operation metadata overrides run metadata on conflicts
+        merged_meta = {}
+        if run_ctx:
+            merged_meta.update(run_ctx.get_meta())
+        if self._meta:
+            merged_meta.update(self._meta)
+
         operation = Operation(
             id=generate_ulid(),
             project=self._project,
@@ -116,7 +124,7 @@ class OpBuilder:
             model=self._model_name,
             inputs=self._inputs or None,
             outputs=self._outputs or None,
-            meta=self._meta or None,
+            meta=merged_meta or None,
             tags=self._tags,
             created_at=datetime.now(timezone.utc),
         )
