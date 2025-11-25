@@ -90,8 +90,8 @@ with run("custom-id"):      # Explicit run ID
 
 # Run-level metadata (propagates to all operations in the run)
 with run(strategy="methodA", experiment_id="exp123") as r:
-    op("test").save()                      # meta={"strategy": "methodA", "experiment_id": "exp123"}
-    op("test").meta(latency_ms=42).save()  # meta includes both run + op metadata
+    op("test").save()                 # meta={"strategy": "methodA", "experiment_id": "exp123"}
+    op("test").meta(delay=42).save()  # meta includes both run + op metadata
 ```
 
 Run metadata is merged with operation metadata. Operation-level values override run-level on conflicts.
