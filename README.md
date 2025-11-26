@@ -1,18 +1,20 @@
-# oplog
+# oplogger
 
 A minimal library for capturing ML/NLP operation traces for later training data export.
 
 ## Installation
 
 ```bash
-pip install oplog
+pip install oplogger
 
 # With PostgreSQL support
-pip install oplog[postgres]
+pip install oplogger[postgres]
 
 # With export features (pandas, HuggingFace datasets)
-pip install oplog[export]
+pip install oplogger[export]
 ```
+
+> **Note**: The package is installed as `oplogger` but imported as `oplog`.
 
 ## Quick Start
 

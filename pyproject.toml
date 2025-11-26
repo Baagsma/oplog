@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "oplog"
-version = "0.1.1"
+name = "oplogger"
+version = "0.1.0"
 description = "A minimal library for capturing ML/NLP operation traces for later training data export"
 readme = "README.md"
 license = "MIT"
