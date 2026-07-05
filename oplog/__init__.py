@@ -31,7 +31,7 @@ from oplog.models import Operation, Record, Run
 from oplog import db
 from oplog import export
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     # Configuration
