@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "oplogger"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A minimal library for capturing ML/NLP operation traces for later training data export"
 readme = "README.md"
 license = "MIT"
@@ -39,6 +39,9 @@ all = ["psycopg2-binary", "pandas", "datasets", "pytest"]
 [project.urls]
 Homepage = "https://github.com/baagsma/oplog"
 Repository = "https://github.com/baagsma/oplog"
+
+[tool.hatch.version]
+path = "oplog/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["oplog"]
