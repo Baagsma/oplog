@@ -82,7 +82,7 @@ class TestBasicOperations:
         assert len(records) == 1
 
     def test_run_level_metadata(self, configured_oplog):
-        """Test that run-level metadata is propagated to operations."""
+        """Run-level metadata lives on the run row, not on operations."""
         with run(strategy="methodA", experiment_id="exp123") as r:
             op("test").save()
             op("test").meta(latency_ms=42).save()
@@ -90,23 +90,35 @@ class TestBasicOperations:
         records = db.query(run_id=r.id)
         assert len(records) == 2
 
+        # Run meta is NOT duplicated onto operations
         for rec in records:
-            assert rec.meta["strategy"] == "methodA"
-            assert rec.meta["experiment_id"] == "exp123"
+            assert rec.meta is None or "strategy" not in rec.meta
 
-        # Check that operation-level meta is also present
-        latency_record = [r for r in records if r.meta.get("latency_ms")][0]
+        # It lives once, on the run row
+        run_row = db.get_run(r.id)
+        assert run_row is not None
+        assert run_row.meta["strategy"] == "methodA"
+        assert run_row.meta["experiment_id"] == "exp123"
+
+        # Operation-level meta stays on the operation
+        latency_record = [x for x in records if x.meta and x.meta.get("latency_ms")][0]
         assert latency_record.meta["latency_ms"] == 42
 
-    def test_run_metadata_override(self, configured_oplog):
-        """Test that operation-level metadata overrides run-level metadata."""
-        with run(strategy="methodA") as r:
-            op("test").meta(strategy="methodB").save()
+    def test_run_row_created_on_entry(self, configured_oplog):
+        """The run row exists as soon as the run starts — a partial run is
+        never lost."""
+        with run(stage="early") as r:
+            row = db.get_run(r.id)
+            assert row is not None
+            assert row.meta["stage"] == "early"
 
-        records = db.query(run_id=r.id)
-        assert len(records) == 1
-        # Operation-level should override run-level
-        assert records[0].meta["strategy"] == "methodB"
+    def test_run_add_meta_writes_through(self, configured_oplog):
+        """add_meta() appends data discovered mid-run and persists it."""
+        with run(kind="turn") as r:
+            op("step").save()
+            r.add_meta(outcome="success")
+            row = db.get_run(r.id)
+            assert row.meta == {"kind": "turn", "outcome": "success"}
 
 
 class TestFlagging:
@@ -126,18 +138,30 @@ class TestFlagging:
         assert records[0].flagged_at is not None
 
     def test_flag_by_run_id(self, configured_oplog):
-        """Test flagging all operations in a run."""
+        """Flagging a run flags the run row itself, not its operations."""
         with run() as r:
             op("op1").save()
             op("op2").save()
             op("op3").save()
 
-        count = db.flag(run_id=r.id, reason="review")
-        assert count == 3
+        count = db.flag(run_id=r.id, reason="review", note="odd resolution")
+        assert count == 1
 
-        records = db.query(run_id=r.id)
-        for rec in records:
-            assert rec.flagged_for == "review"
+        run_row = db.get_run(r.id)
+        assert run_row.flagged_for == "review"
+        assert run_row.flag_note == "odd resolution"
+        assert run_row.flagged_at is not None
+
+        # Operations stay unflagged — no duplication
+        for rec in db.query(run_id=r.id):
+            assert rec.flagged_for is None
+
+        # And run queries can filter on the flag
+        flagged = db.runs(flagged_for="review")
+        assert [x.id for x in flagged] == [r.id]
+
+        assert db.unflag(run_id=r.id) == 1
+        assert db.get_run(r.id).flagged_for is None
 
     def test_unflag(self, configured_oplog):
         """Test removing flags from operations."""

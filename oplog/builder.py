@@ -107,13 +107,9 @@ class OpBuilder:
         """
         run_ctx = get_current_run()
 
-        # Merge run-level metadata with operation-level metadata
-        # Operation metadata overrides run metadata on conflicts
-        merged_meta = {}
-        if run_ctx:
-            merged_meta.update(run_ctx.get_meta())
-        if self._meta:
-            merged_meta.update(self._meta)
+        # Run-level metadata lives on the run row (runs table) — it is NOT
+        # merged into operations. Query it via db.get_run()/db.runs().
+        merged_meta = dict(self._meta) if self._meta else {}
 
         operation = Operation(
             id=generate_ulid(),

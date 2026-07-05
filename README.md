@@ -45,10 +45,15 @@ with run(strategy="rerank_v2", experiment="exp_042") as r:
         .output(ranked=["Paris is the capital..."], scores=[0.94]) \
         .meta(latency_ms=42) \
         .save()
-    # Both ops get meta={"strategy": "rerank_v2", "experiment": "exp_042", ...}
+    # A run row is created on entry; its meta lives there (not on the ops).
+    # Data discovered mid-run can be appended: r.add_meta(outcome="ok")
 
-# Flag for training
+# Flag the run itself (lands on the run row, not its operations)
 db.flag(run_id=r.id, reason="training", note="clean example")
+
+# Query runs
+flagged_runs = db.runs(flagged_for="training")
+run_row = db.get_run(r.id)
 
 # Query and export
 records = db.query(operation="rerank", flagged_for="training")
@@ -112,9 +117,13 @@ records = db.query(
     offset=0,
 )
 
-# Flag
+# Runs (first-class rows: run-level meta, flags, and notes live here)
+run_row = db.get_run("...")
+rows = db.runs(project="...", flagged_for="review", limit=50)
+
+# Flag — ids target operation rows; run_id targets the run row itself
 db.flag(ids=[...], reason="training", note="optional note")
-db.flag(run_id="...", reason="review")
+db.flag(run_id="...", reason="review", note="odd resolution")
 
 # Unflag
 db.unflag(ids=[...])

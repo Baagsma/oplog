@@ -81,12 +81,37 @@ class Tracer:
         Yields:
             The RunContext for this run.
 
+        Note:
+            A run row is persisted to the runs table on entry; run-level
+            metadata lives there (it is not merged into operations).
+
         Example:
             with tracer.run(strategy="methodA", experiment_id="exp123") as r:
-                tracer.op("test").save()  # Has meta={"strategy": "methodA", ...}
+                tracer.op("test").save()  # op row references r.id
         """
         with run_context(run_id, meta=meta if meta else None) as ctx:
+            self._persist_run(ctx)
             yield ctx
+
+    def _persist_run(self, ctx: RunContext) -> None:
+        """Write the run row when the run starts (upsert — reused ids refresh
+        meta) and bind write-through so add_meta() persists immediately."""
+        from datetime import datetime, timezone
+
+        from oplog.models import Run
+
+        def persist(c: RunContext) -> None:
+            self._backend.save_run(
+                Run(
+                    id=c.id,
+                    project=self._project,
+                    meta=c.get_meta() or None,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+
+        persist(ctx)
+        ctx._persist_fn = persist
 
 
 def configure(
@@ -163,9 +188,9 @@ def run(run_id: Optional[str] = None, **meta: Any) -> Iterator[RunContext]:
 
     Example:
         with run(strategy="methodA", experiment_id="exp123") as r:
-            op("test").save()  # Has meta={"strategy": "methodA", ...}
+            op("test").save()  # op row references r.id
     """
-    # Validate tracer is configured
-    get_tracer()
+    tracer = get_tracer()
     with run_context(run_id, meta=meta if meta else None) as ctx:
+        tracer._persist_run(ctx)
         yield ctx

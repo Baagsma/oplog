@@ -27,11 +27,11 @@ Example usage:
 """
 
 from oplog.config import configure, Tracer, op, run
-from oplog.models import Operation, Record
+from oplog.models import Operation, Record, Run
 from oplog import db
 from oplog import export
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Configuration
@@ -43,6 +43,7 @@ __all__ = [
     # Models
     "Operation",
     "Record",
+    "Run",
     # Submodules
     "db",
     "export",

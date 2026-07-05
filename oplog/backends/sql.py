@@ -23,7 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-from oplog.models import Operation
+from oplog.models import Operation, Run
 
 
 class SQLBackend:
@@ -65,8 +65,20 @@ class SQLBackend:
                 max_overflow=max_overflow,
             )
 
-        # Define metadata and table
+        # Define metadata and tables
         self._metadata = MetaData()
+        self._runs = Table(
+            "runs",
+            self._metadata,
+            Column("id", String(255), primary_key=True),
+            Column("project", String(255), nullable=False),
+            Column("meta", JSON, nullable=True),
+            Column("tags", JSON, default="[]"),
+            Column("flagged_for", String(255), nullable=True),
+            Column("flag_note", Text, nullable=True),
+            Column("created_at", DateTime, nullable=False),
+            Column("flagged_at", DateTime, nullable=True),
+        )
         self._operations = Table(
             "operations",
             self._metadata,
@@ -99,6 +111,8 @@ class SQLBackend:
             Index("idx_operations_operation", self._operations.c.operation),
             Index("idx_operations_run_id", self._operations.c.run_id),
             Index("idx_operations_created", self._operations.c.created_at),
+            Index("idx_runs_project", self._runs.c.project),
+            Index("idx_runs_created", self._runs.c.created_at),
         ]
 
         for idx in indexes:
@@ -127,6 +141,85 @@ class SQLBackend:
             conn.execute(insert(self._operations).values(**data))
 
         return operation.id
+
+    def save_run(self, run: Run) -> str:
+        """Persist a run row. Upserts: an existing id has its meta/tags
+        refreshed (callers may legitimately reuse a run id across entries,
+        e.g. one id per thread re-entered per iteration)."""
+        with self._engine.begin() as conn:
+            existing = conn.execute(
+                select(self._runs.c.id).where(self._runs.c.id == run.id)
+            ).fetchone()
+            if existing:
+                values: Dict[str, Any] = {}
+                if run.meta:
+                    values["meta"] = run.meta
+                if run.tags:
+                    values["tags"] = run.tags
+                if values:
+                    conn.execute(
+                        update(self._runs).where(self._runs.c.id == run.id).values(**values)
+                    )
+            else:
+                conn.execute(
+                    insert(self._runs).values(
+                        id=run.id,
+                        project=run.project,
+                        meta=run.meta,
+                        tags=run.tags,
+                        flagged_for=run.flagged_for,
+                        flag_note=run.flag_note,
+                        created_at=run.created_at,
+                        flagged_at=run.flagged_at,
+                    )
+                )
+        return run.id
+
+    def get_run(self, run_id: str) -> Optional[Run]:
+        """Fetch a single run row by id."""
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(self._runs).where(self._runs.c.id == run_id)
+            ).fetchone()
+        return self._row_to_run(row._mapping) if row else None
+
+    def query_runs(
+        self,
+        project: Optional[str] = None,
+        flagged_for: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        after: Optional[datetime] = None,
+        before: Optional[datetime] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> List[Run]:
+        """Query run rows with filters."""
+        stmt = select(self._runs)
+
+        if project is not None:
+            stmt = stmt.where(self._runs.c.project == project)
+        if flagged_for is not None:
+            stmt = stmt.where(self._runs.c.flagged_for == flagged_for)
+        if after is not None:
+            stmt = stmt.where(self._runs.c.created_at > after)
+        if before is not None:
+            stmt = stmt.where(self._runs.c.created_at < before)
+        if tags:
+            for tag in tags:
+                if self._is_sqlite:
+                    stmt = stmt.where(self._runs.c.tags.contains(f'"{tag}"'))
+                else:
+                    stmt = stmt.where(self._runs.c.tags.contains([tag]))
+
+        stmt = stmt.order_by(self._runs.c.created_at.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset is not None:
+            stmt = stmt.offset(offset)
+
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [self._row_to_run(row._mapping) for row in rows]
 
     def query(
         self,
@@ -196,7 +289,8 @@ class SQLBackend:
         run_id: Optional[str] = None,
         note: Optional[str] = None,
     ) -> int:
-        """Flag operations. Returns count of affected rows."""
+        """Flag operations (by ids) or a run (by run_id — flags the run row
+        itself, not its operations). Returns count of affected rows."""
         if ids is None and run_id is None:
             raise ValueError("Either ids or run_id must be provided")
 
@@ -208,12 +302,12 @@ class SQLBackend:
         if note is not None:
             values["flag_note"] = note
 
-        stmt = update(self._operations).values(**values)
-
-        if ids is not None:
-            stmt = stmt.where(self._operations.c.id.in_(ids))
-        elif run_id is not None:
-            stmt = stmt.where(self._operations.c.run_id == run_id)
+        if run_id is not None:
+            stmt = update(self._runs).values(**values).where(self._runs.c.id == run_id)
+        else:
+            stmt = update(self._operations).values(**values).where(
+                self._operations.c.id.in_(ids)
+            )
 
         with self._engine.begin() as conn:
             result = conn.execute(stmt)
@@ -224,7 +318,8 @@ class SQLBackend:
         ids: Optional[List[str]] = None,
         run_id: Optional[str] = None,
     ) -> int:
-        """Remove flags. Returns count of affected rows."""
+        """Remove flags from operations (by ids) or from a run row (by
+        run_id). Returns count of affected rows."""
         if ids is None and run_id is None:
             raise ValueError("Either ids or run_id must be provided")
 
@@ -234,12 +329,12 @@ class SQLBackend:
             "flagged_at": None,
         }
 
-        stmt = update(self._operations).values(**values)
-
-        if ids is not None:
-            stmt = stmt.where(self._operations.c.id.in_(ids))
-        elif run_id is not None:
-            stmt = stmt.where(self._operations.c.run_id == run_id)
+        if run_id is not None:
+            stmt = update(self._runs).values(**values).where(self._runs.c.id == run_id)
+        else:
+            stmt = update(self._operations).values(**values).where(
+                self._operations.c.id.in_(ids)
+            )
 
         with self._engine.begin() as conn:
             result = conn.execute(stmt)
@@ -263,6 +358,23 @@ class SQLBackend:
             "created_at": op.created_at,
             "flagged_at": op.flagged_at,
         }
+
+    def _row_to_run(self, row: Dict[str, Any]) -> Run:
+        """Convert a database row to a Run."""
+        tags = row["tags"]
+        if isinstance(tags, str):
+            tags = json.loads(tags)
+
+        return Run(
+            id=row["id"],
+            project=row["project"],
+            meta=row["meta"],
+            tags=tags or [],
+            flagged_for=row["flagged_for"],
+            flag_note=row["flag_note"],
+            created_at=row["created_at"],
+            flagged_at=row["flagged_at"],
+        )
 
     def _row_to_operation(self, row: Dict[str, Any]) -> Operation:
         """Convert a database row to an Operation."""

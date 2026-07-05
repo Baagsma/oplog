@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional, Protocol, runtime_checkable
 
-from oplog.models import Operation
+from oplog.models import Operation, Run
 
 
 @runtime_checkable
@@ -12,6 +12,27 @@ class Backend(Protocol):
 
     def save(self, operation: Operation) -> str:
         """Persist an operation. Returns the operation ID."""
+        ...
+
+    def save_run(self, run: Run) -> str:
+        """Persist a run row (upsert). Returns the run ID."""
+        ...
+
+    def get_run(self, run_id: str) -> Optional[Run]:
+        """Fetch a single run row by id."""
+        ...
+
+    def query_runs(
+        self,
+        project: Optional[str] = None,
+        flagged_for: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        after: Optional[datetime] = None,
+        before: Optional[datetime] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> List[Run]:
+        """Query run rows with filters."""
         ...
 
     def query(

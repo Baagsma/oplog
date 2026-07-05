@@ -102,9 +102,10 @@ def test_tool_use_chain():
         assert results[1].seq == 1
         assert results[1].operation == "generate_answer"
 
-        # Both should have the run-level metadata
-        assert results[0].meta["pipeline"] == "weather_agent"
-        assert results[1].meta["pipeline"] == "weather_agent"
+        # Run-level metadata lives on the run row, not on the operations
+        run_row = db.get_run(r.id)
+        assert run_row.meta["pipeline"] == "weather_agent"
+        assert all(x.meta is None or "pipeline" not in x.meta for x in results)
 
 
 # =============================================================================
@@ -140,8 +141,10 @@ def test_conversation_logging():
         for i, result in enumerate(results):
             assert result.seq == i
 
-        # Verify run metadata propagated
-        assert all(r.meta["user"] == "alice" for r in results)
+        # Run metadata lives on the run row
+        run_row = db.get_run(r.id)
+        assert run_row.meta["user"] == "alice"
+        assert run_row.meta["conversation_id"] == "chat_001"
 
 
 # =============================================================================
@@ -295,13 +298,13 @@ def test_ab_model_comparison():
         prompt = "Explain quantum computing in simple terms."
 
         # Model A response
-        with oplog.run(experiment="explain_quantum", variant="A"):
+        with oplog.run(experiment="explain_quantum", variant="A") as run_a:
             oplog.op("generate").model("llama-3.2-3b").input(prompt=prompt).output(
                 text="Quantum computing uses quantum bits that can be 0 and 1 at the same time..."
             ).meta(tokens=45, latency_ms=120).save()
 
         # Model B response
-        with oplog.run(experiment="explain_quantum", variant="B"):
+        with oplog.run(experiment="explain_quantum", variant="B") as run_b:
             oplog.op("generate").model("llama-3.2-8b").input(prompt=prompt).output(
                 text="Imagine a coin spinning in the air - that's like a quantum bit..."
             ).meta(tokens=52, latency_ms=280).save()
@@ -312,8 +315,11 @@ def test_ab_model_comparison():
 
         assert len(model_a) == 1
         assert len(model_b) == 1
-        assert model_a[0].meta["variant"] == "A"
-        assert model_b[0].meta["variant"] == "B"
+        # The variant is run-level data — look it up via the op's run_id
+        assert db.get_run(model_a[0].run_id).meta["variant"] == "A"
+        assert db.get_run(model_b[0].run_id).meta["variant"] == "B"
+        assert model_a[0].run_id == run_a.id
+        assert model_b[0].run_id == run_b.id
 
 
 if __name__ == "__main__":

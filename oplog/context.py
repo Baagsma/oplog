@@ -19,11 +19,14 @@ class RunContext:
 
         Args:
             run_id: The unique identifier for this run.
-            meta: Optional metadata to attach to all operations in this run.
+            meta: Optional run-level metadata (stored on the run row).
         """
         self._id = run_id
         self._seq = 0
         self._meta: Dict[str, Any] = meta or {}
+        # Set by the tracer once the run row is persisted; lets add_meta()
+        # write through so a crash never loses accreted run data.
+        self._persist_fn = None
 
     @property
     def id(self) -> str:
@@ -52,6 +55,19 @@ class RunContext:
         current = self._seq
         self._seq += 1
         return current
+
+    def add_meta(self, **meta: Any) -> "RunContext":
+        """Merge additional metadata onto this run and persist immediately.
+
+        The run row is created when the run starts; data that only becomes
+        known mid-run (a classification, an outcome summary) is appended
+        here rather than serialized post-hoc, so partial runs keep whatever
+        was known before an interruption.
+        """
+        self._meta.update(meta)
+        if self._persist_fn is not None:
+            self._persist_fn(self)
+        return self
 
 
 def get_current_run() -> Optional[RunContext]:
