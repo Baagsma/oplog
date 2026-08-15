@@ -1,14 +1,23 @@
-"""Thread-local run context management for oplog."""
+"""Run context management for oplog.
 
-import threading
+The ambient run lives in a contextvars.ContextVar, not threading.local:
+contextvars follow execution across asyncio tasks AND into worker threads
+(asyncio.to_thread copies the context), so operations recorded by a
+blocking call that an async caller moved off the event loop still attach
+to the caller's run. threading.local silently orphaned exactly those ops
+(run_id=None) the moment a caller introduced to_thread.
+"""
+
+import contextvars
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
 
 from oplog.utils import generate_ulid
 
 
-# Thread-local storage for run context
-_local = threading.local()
+_run_context: "contextvars.ContextVar[Optional[RunContext]]" = contextvars.ContextVar(
+    "oplog_run_context", default=None
+)
 
 
 class RunContext:
@@ -76,7 +85,7 @@ def get_current_run() -> Optional[RunContext]:
     Returns:
         The current RunContext, or None if not inside a run.
     """
-    return getattr(_local, "run_context", None)
+    return _run_context.get()
 
 
 @contextmanager
@@ -100,8 +109,8 @@ def run_context(
         run_id = generate_ulid()
 
     ctx = RunContext(run_id, meta=meta)
-    _local.run_context = ctx
+    token = _run_context.set(ctx)
     try:
         yield ctx
     finally:
-        _local.run_context = None
+        _run_context.reset(token)
